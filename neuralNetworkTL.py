@@ -13,9 +13,10 @@ benstanley@live.co.uk
 # TODO: Include public predict method and an assertion for
 #       data size/weights compatability
 # TODO: public method getParameters
+# TODO: "No bias detected, during cost function"
 
 import numpy as np
-from scipy.optimize import fmin_bfgs
+from scipy.optimize import minimize
 import pdb
 
 class neuralNetwork(object):
@@ -68,29 +69,41 @@ class neuralNetwork(object):
         bias terms added to the input data.
         """
         
-        theta1 = np.random.uniform((-1/np.sqrt(self.il_size)),
-                                        (1/np.sqrt(self.il_size)),
-                                        [self.hl_size, self.il_size + init_bias])
+        theta1 = np.random.uniform(
+                                   (-1/np.sqrt(self.il_size)),
+                                   (1/np.sqrt(self.il_size)),
+                                   [self.hl_size, self.il_size + init_bias])
         
-        theta2 = np.random.uniform((-1/np.sqrt(self.hl_size)),
-                                        (1/np.sqrt(self.hl_size)),
-                                        [self.n_labels, self.hl_size + init_bias])
+        theta2 = np.random.uniform(
+                                   (-1/np.sqrt(self.hl_size)),
+                                   (1/np.sqrt(self.hl_size)),
+                                   [self.n_labels, self.hl_size + init_bias])
             
-        self.nn_params = np.concatenate([theta1.ravel(),
+        self.nn_weights = np.concatenate(
+                                        [theta1.ravel(),
                                          theta2.ravel()])
+    
+    # Unroll the vector of network weights
+    def __unrollWeights(self, weights):
+        
+        theta1 = np.reshape(self.nn_weights[0:self.hl_size * (self.il_size + self.bias)],
+                            [self.hl_size, (self.il_size + self.bias)])
             
-    # Set weights to specified values
+        theta2 = np.reshape(self.nn_weights[(self.hl_size * (self.il_size + self.bias))::],
+                                                [self.n_labels, (self.hl_size + self.bias)])
+                            
+        return theta1, theta2
+    
+    # Set weights to user specified values
     def setWeights(self, new_theta1, new_theta2, add_bias=False):
     
         """
         Public method to set global parameter 
         values to user specified values
         """
+
         # unroll parameters into theta1 & theta 2
-        theta1 = np.reshape(self.nn_params[0:self.hl_size * (self.il_size + self.bias)],
-                            [self.hl_size, (self.il_size + self.bias)])
-        theta2 = np.reshape(self.nn_params[(self.hl_size * (self.il_size + self.bias))::],
-                            [self.n_labels, (self.hl_size + self.bias)])
+        theta1, theta2 = self.__unrollWeights(self.nn_weights)
         
         print "Previous Theta1 parameter size = ", theta1.shape
         print "Previous Theta1 parameter size = ", theta2.shape
@@ -104,6 +117,8 @@ class neuralNetwork(object):
             np.insert(new_theta1, 0, 1, axis=1)
             np.insert(new_theta2, 0, 1, axis=1)
         
+        elif add_bias == False:
+            pass
         
         else:
             raise ValueError("Only boolean values can be used for 'add_bias'")
@@ -115,18 +130,25 @@ class neuralNetwork(object):
         print "New Theta1 parameter size = ", theta1.shape
         print "New Theta1 parameter size = ", theta2.shape
 
-        self.nn_params = np.concatenate([theta1.ravel(),
+        self.nn_weights = np.concatenate([theta1.ravel(),
                                         theta2.ravel()])
     
     # 'One-Hot' Matrix
     def __oneHot(self, y):
+        
+        """
+        Converts a vector of target 
+        integers into a sparse matrix
+        where each row is a traget 
+        vector.
+        """
         
         y_ohm = np.zeros([len(y), self.n_labels])
         i = len(y) - 1
 
         while i > 0:
             y_vec = np.zeros(self.n_labels)
-            y_vec[y[i]] = 1
+            y_vec[y[i] - 1] = 1
             y_ohm[i,:] = y_vec
             i -= 1
     
@@ -157,7 +179,7 @@ class neuralNetwork(object):
         return np.multiply(gz, (1 - gz))
 
     # Perform Fowarad Propagation
-    def __forwardProp(self,X, theta1, theta2):
+    def __forwardProp(self, X, theta1, theta2):
     
         """
         A vectorized implementation of 
@@ -202,12 +224,8 @@ class neuralNetwork(object):
         -fitting, this is weighted with lamda.
         """
         
-        # Unroll parameter vector into two matrices
-        theta1 = np.reshape(initial_theta[0:self.hl_size * (self.il_size + self.bias)],
-                                [self.hl_size, (self.il_size + self.bias)])
-                                
-        theta2 = np.reshape(initial_theta[(self.hl_size * (self.il_size + self.bias))::],
-                                [self.n_labels, (self.hl_size + self.bias)])
+        # unroll parameters into theta1 & theta 2
+        theta1, theta2 = self.__unrollWeights(initial_theta)
         
         # Convert target values to one hot matrix
         y_matrix = self.__oneHot(y)
@@ -264,31 +282,47 @@ class neuralNetwork(object):
         theta1_grad += theta1_reg * (self.lamda / m)
         theta2_grad += theta2_reg * (self.lamda / m)
         
-        nn_params = np.concatenate([theta1_grad.ravel(),
+        nn_weights = np.concatenate([theta1_grad.ravel(),
                                    theta2_grad.ravel()])
                                    
         print J
 
-        return J, nn_params
+        return J, nn_weights
 
-
-    def __decCost(self, initial_theta, X, y):
-        self.iter +=1
-        print self.iter
-        return self.__nnCost(initial_theta, X, y)[0]
+    # Public method for training the network
+    def train(self, X, y, max_it=None):
+        
+        """
+        Utilises the 'minimize' module
+        from the scipy library to train
+        the network, finding the optimum
+        set of parameters (weights).
+        """
+        
+        print "Initial cost is - ", self.__nnCost(self.nn_weights,X,y)[0]
     
-    def __decGrad(self, initial_theta, X, y):
-        return self.__nnCost(initial_theta, X, y)[1]
-    
-    def fit(self, X, y, max_it=None):
-    
+        # Parse the input variable 'max_it'
         if (max_it == None):
-            max_it = 400
-    
-        [model, cost] = fmin_bfgs(self.__decCost, self.nn_params,
-                         maxiter=max_it, args=(X,y), fprime=self.__decGrad)
+            max_it = 100
+        
+        # Train the network
+        result = minimize(
+                          self.__nnCost,
+                          self.nn_weights,
+                          args=(X, y),
+                          method='CG',
+                          jac=True,
+                          options={'maxiter': 50, 'disp': False})
+        
+        # Extract the parameters from
+        # the results object
+        model = result['x']
+        
+        # Set the global network parameters
+        self.nn_weights = model
 
-        self.nn_params = model
+        return model
+
     
 
 
